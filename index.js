@@ -1,119 +1,111 @@
-const express = require('express')
-const app = express()
-const port = process.env.PORT || 5000
-const cors = require('cors')
+require('dotenv').config(); // 🟢 Load .env file
+
+const express = require('express');
+const app = express();
+const cors = require('cors');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
+const port = process.env.PORT || 5000;
+const uri = process.env.MONGO_URI;  // 🟢 Ensure MONGO_URI is loaded
+
+if (!uri) {
+    console.error("❌ MONGO_URI is not defined! Check your .env file.");
+    process.exit(1);
+}
 
 app.use(cors());
 app.use(express.json());
-app.get('/', (req, res) => {
-  res.send('Hello World!')
-})
 
-//mongodb config
-
-
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const uri = "mongodb+srv://kitabganj:02072003@cluster0.dixtulj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
+    serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+    }
 });
 
 async function run() {
-  try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    try {
+        await client.connect();
+        console.log("✅ Connected to MongoDB!");
 
-    //create a collection of documents
+        const bookCollection = client.db("kitabganj").collection("kitab");
 
-    const bookCollection = client.db("kitabganj").collection("kitab");
+        // 📌 Upload a book (POST)
+        app.post("/upload-book", async (req, res) => {
+            const data = req.body;
+            const result = await bookCollection.insertOne(data);
+            res.send(result);
+        });
 
-    // insert a book to the db: post method
+        // 📌 Get all books (GET)
+        app.get("/all-books", async (req, res) => {
+            let query = {};
+            if (req.query?.category) {
+                query.category = req.query.category;
+            }
+            if (req.query?.uploadedBy) {
+                query.uploadedBy = req.query.uploadedBy;
+            }
+            const result = await bookCollection.find(query).toArray();
+            res.send(result);
+        });
 
-    app.post("/upload-book", async(req, res) => {
-      const data = req.body ;
-      const result = await bookCollection.insertOne(data);
-      res.send(result);
-    })
-    
-    //get all books from the database
+        // 📌 Get a single book by title (GET)
+        app.get("/book/:name", async (req, res) => {
+            const name = req.params.name;
+            const filter = { book_title: name };
+            const result = await bookCollection.findOne(filter);
+            res.send(result);
+        });
 
-     
-    
-    //update a book data : patch or update methods
-    app.patch("/book/:id", async(req, res)=>{
-      const id = req.params.id;
-      //console.log(id);
-      const updateBookData = req.body;
-      const filter = {_id: new ObjectId(id)};
-      const options = { upsert: true };
+        // 📌 Update a book (PATCH)
+        app.patch("/book/:id", async (req, res) => {
+            const id = req.params.id;
+            const updateBookData = req.body;
+            const filter = { _id: new ObjectId(id) };
+            const options = { upsert: true };
 
-      const updateDoc = {
-        $set: {
-              ...updateBookData
-        }
-      }
-      //update
-      const result = await bookCollection.updateOne(filter,updateDoc, options );
+            const updateDoc = {
+                $set: { ...updateBookData }
+            };
 
-      res.send(result);
-    })
-    
-    app.delete("/book/:id", async(req, res)=>{
-      const id =  req.params.id;
-      const filter = {_id: new ObjectId(id)};
-      const result = await bookCollection.deleteOne(filter);
-      res.send(result);
-    })
+            const result = await bookCollection.updateOne(filter, updateDoc, options);
+            res.send(result);
+        });
 
-    //find by category
-    app.get("/all-books", async (req, res) => {
-      let query = {};
-      if (req.query?.category) {
-        query.category = req.query.category;
-      }
-      if (req.query?.uploadedBy) {
-        query.uploadedBy = req.query.uploadedBy;
-      }
-      const result = await bookCollection.find(query).toArray();
-      res.send(result);
-    });
-    
-    // to get single book data
-    app.get("/book/:name", async(req, res)=>{
-      const name = req.params.name;
-      const filter = {book_title: name};
-      const result = await bookCollection.findOne(filter);
-      res.send(result);
-    });
-    app.get("/search-books", async (req, res) => {
-  const query = req.query.q;
-  const searchQuery = {
-    $or: [
-      { book_title: { $regex: query, $options: "i" } },
-      { author_name: { $regex: query, $options: "i" } }
-    ]
-  };
+        // 📌 Delete a book (DELETE)
+        app.delete("/book/:id", async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) };
+            const result = await bookCollection.deleteOne(filter);
+            res.send(result);
+        });
 
-  const result = await bookCollection.find(searchQuery).toArray();
-  res.send(result);
-});
+        // 📌 Search books (GET)
+        app.get("/search-books", async (req, res) => {
+            const query = req.query.q;
+            const searchQuery = {
+                $or: [
+                    { book_title: { $regex: query, $options: "i" } },
+                    { author_name: { $regex: query, $options: "i" } }
+                ]
+            };
 
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
-  }
+            const result = await bookCollection.find(searchQuery).toArray();
+            res.send(result);
+        });
+
+        // ✅ Ping MongoDB
+        await client.db("admin").command({ ping: 1 });
+        console.log("✅ Pinged your deployment. MongoDB is working!");
+    } catch (err) {
+        console.error("❌ Error connecting to MongoDB:", err);
+    }
 }
+
 run().catch(console.dir);
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`)
-})
+    console.log(`🚀 Server is running on port ${port}`);
+});
